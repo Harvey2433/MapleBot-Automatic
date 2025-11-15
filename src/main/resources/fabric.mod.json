@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "maplebot-automatic",
+  "version": "${version}",
+  "name": "MapleBot-Automatic",
+  "description": "用于MapleBot-xin的自动化操作模组",
+  "authors": [],
+  "contact": {},
+  "license": "LGPL-3.0",
+  "icon": "assets/maplebot-automatic/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "me.maple_bamboo_team.maplebotAutomatic.client.MaplebotAutomaticClient"
+    ],
+    "main": [
+      "me.maple_bamboo_team.maplebotAutomatic.MaplebotAutomatic"
+    ]
+  },
+  "mixins": [
+    "maplebot-automatic.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
