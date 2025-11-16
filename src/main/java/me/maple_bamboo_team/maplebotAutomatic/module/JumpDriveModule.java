@@ -25,8 +25,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * JumpDrive (回城) 核心模块。
- * 负责处理回城请求、状态机管理和初始化位置 (InitPos) 维护。
+ * JumpDrive (回城) 核心模块
+ * 负责处理回城请求、状态机管理和初始化位置 (InitPos) 维护
  */
 public class JumpDriveModule implements IModule {
 
@@ -65,13 +65,13 @@ public class JumpDriveModule implements IModule {
 
     private final AtomicInteger tickTimer = new AtomicInteger(0);
 
-    // 状态阶段定义: Phase 1/2 (Init Move for request) 已被移除。
+    // 状态阶段定义: Phase 1/2 (Init Move for request) 已被移除
     private int phase = 0; // 0: Idle/Ready
 
     private static final int PHASE_IDLE_MOVE = -1; // 返回初始化位置 (InitPos)
     private static final int PHASE_MOVE_TO_PEARL_START = 3; // 启动 GOTO 珍珠位置
     private static final int PHASE_MOVE_TO_PEARL_GOTO = 4;  // GOTO 珍珠位置进行中
-    private static final int PHASE_PRE_MUSE = 5;          // 抵达后，运行 /muse 前的延迟
+    private static final int PHASE_PRE_MUSE = 5;          // 抵达后, 运行 /muse 前的延迟
     private static final int PHASE_CHECK_PLAYER = 6;     // 执行玩家检测
     private static final int PHASE_COMPLETE = 7;         // 流程完成
     private static final int PHASE_RETRY_WAIT = 65;      // 等待重试回复
@@ -108,7 +108,7 @@ public class JumpDriveModule implements IModule {
         resetModuleState();
 
         if (config.enableJumpDriveModule) {
-            logDebug("模块已启用。指令: /" + config.jumpDriveSettings.jumpDriveCommand);
+            logDebug("模块已启用指令: /" + config.jumpDriveSettings.jumpDriveCommand);
             ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
                 dispatcher.register(ClientCommandManager.literal(config.jumpDriveSettings.jumpDriveCommand)
                         .then(ClientCommandManager.literal("reload").executes(context -> {
@@ -120,7 +120,7 @@ public class JumpDriveModule implements IModule {
                             }
                             reloadConfigAndData();
                             resetModuleState();
-                            sendFeedback(Text.literal("§a[JumpDrive] 模块已重置，配置已刷新。"));
+                            sendFeedback(Text.literal("§a[JumpDrive] 模块已重置, 配置已刷新"));
                             return 1;
                         }))
                 );
@@ -174,7 +174,7 @@ public class JumpDriveModule implements IModule {
                 config.jumpDriveSettings.allowedError,
                 config.finderSettings.maxSearchDistance
         );
-        logDebug("配置依赖数据已重新加载。");
+        logDebug("配置依赖数据已重新加载");
     }
 
     private void resetModuleState() {
@@ -199,7 +199,7 @@ public class JumpDriveModule implements IModule {
         retryWaitPlayer = null;
         retryWaitTimeoutTimestamp = 0;
 
-        logDebug("模块运行状态已重置。");
+        logDebug("模块运行状态已重置");
     }
 
     private boolean isAtInitPos() {
@@ -219,7 +219,7 @@ public class JumpDriveModule implements IModule {
         if (client.world != null && !startupCheckDone) {
             startupCheckDone = true;
             if (pearlData != null && pearlData.initPosition != null && phase == 0 && !isAtInitPos()) {
-                logDebug("启动检查：首次进入服务器/存档且不在 InitPos，开始前往 InitPos (Phase -1)。所有请求等待。");
+                logDebug("启动检查：首次进入服务器/存档且不在 InitPos, 开始前往 InitPos (Phase -1)所有请求等待");
                 currentTargetMove = pearlData.initPosition;
                 String initPosString = String.format("%.0f %.0f %.0f", currentTargetMove.x, currentTargetMove.y, currentTargetMove.z);
                 client.player.networkHandler.sendChatMessage("#goto " + initPosString);
@@ -228,7 +228,7 @@ public class JumpDriveModule implements IModule {
                 lastPlayerPos = client.player.getPos();
                 stationaryTicks = dynamicTimeoutTicks = 0;
             } else {
-                logDebug("启动检查完成：已在 InitPos 或 InitPos 未配置。");
+                logDebug("启动检查完成：已在 InitPos 或 InitPos 未配置");
             }
         }
 
@@ -237,7 +237,7 @@ public class JumpDriveModule implements IModule {
         exclusionResetMap.entrySet().removeIf(entry -> {
             if (currentTime >= entry.getValue()) {
                 excludedPearlIndices.remove(entry.getKey());
-                logDebug("玩家 " + entry.getKey() + " 的珍珠排除列表已复位。");
+                logDebug("玩家 " + entry.getKey() + " 的珍珠排除列表已复位");
                 return true;
             }
             return false;
@@ -248,14 +248,14 @@ public class JumpDriveModule implements IModule {
             if (phase != 0) {
                 retryWaitPlayer = null;
                 playerDiedDuringProcessing = currentProcessingPlayer;
-                client.player.networkHandler.sendChatCommand("goto cancel");
+                client.player.networkHandler.sendChatCommand("#goto cancel");
                 finishProcessing(currentProcessingPlayer, true);
             }
             return;
         } else if (playerDiedDuringProcessing != null) {
             String diedPlayer = playerDiedDuringProcessing;
             playerDiedDuringProcessing = null;
-            client.player.networkHandler.sendChatMessage("msg " + diedPlayer + " " + deathCancelMessage);
+            client.player.networkHandler.sendChatMessage(diedPlayer + " " + deathCancelMessage);
             if (!requestQueue.isEmpty()) tickTimer.set(1);
         }
 
@@ -263,7 +263,7 @@ public class JumpDriveModule implements IModule {
         if (phase == PHASE_RETRY_WAIT) {
             if (currentTime >= retryWaitTimeoutTimestamp) {
                 if (retryWaitPlayer != null) {
-                    client.player.networkHandler.sendChatMessage("msg " + retryWaitPlayer + " " + retryTimeoutMessage);
+                    client.player.networkHandler.sendChatMessage(retryWaitPlayer + " " + retryTimeoutMessage);
                     finishProcessing(retryWaitPlayer, true);
                 } else {
                     phase = 0;
@@ -287,7 +287,7 @@ public class JumpDriveModule implements IModule {
                         if (dynamicTimeoutTicks > timeoutAfterStationaryTicks) {
                             client.player.networkHandler.sendChatCommand("goto cancel");
                             if (phase != PHASE_IDLE_MOVE) {
-                                client.player.networkHandler.sendChatMessage("msg " + currentProcessingPlayer + " 跃迁引擎故障：导航系统无响应或目标不可达。");
+                                client.player.networkHandler.sendChatCommand(buildJumpMessage(currentProcessingPlayer + " 跃迁引擎故障：导航系统无响应或目标不可达"));
                                 finishProcessing(currentProcessingPlayer, true);
                             } else {
                                 phase = 0;
@@ -309,12 +309,12 @@ public class JumpDriveModule implements IModule {
                 stationaryTicks = dynamicTimeoutTicks = 0;
 
                 if (phase == PHASE_IDLE_MOVE) {
-                    client.player.sendMessage(Text.literal("§a[Maplebot] 已抵达初始化位置，等待回城请求。"), false);
+                    client.player.sendMessage(Text.literal("§a[Maplebot] 已抵达初始化位置, 等待回城请求"), false);
                     phase = 0;
                     currentTargetMove = null;
                     return;
                 } else { // phase == PHASE_MOVE_TO_PEARL_GOTO (Phase 4)
-                    client.player.sendMessage(Text.literal("§a[Maplebot] 已抵达目标位置。"), false);
+                    client.player.sendMessage(Text.literal("§a[Maplebot] 已抵达目标位置"), false);
                     tickTimer.set(preMuseDelayTicks);
                     phase = PHASE_PRE_MUSE; // Phase 5
                 }
@@ -335,7 +335,7 @@ public class JumpDriveModule implements IModule {
         if (currentProcessingPlayer == null && client.player != null && phase == 0 && tickTimer.get() == 0) {
             if (!requestQueue.isEmpty()) {
                 currentProcessingPlayer = requestQueue.poll();
-                logDebug("队列延迟/闲置结束，开始处理队列中的玩家: " + currentProcessingPlayer);
+                logDebug("队列延迟/闲置结束, 开始处理队列中的玩家: " + currentProcessingPlayer);
                 startJumpDrive(currentProcessingPlayer);
             }
         }
@@ -351,14 +351,14 @@ public class JumpDriveModule implements IModule {
         String playerName = currentProcessingPlayer;
 
         switch (phase) {
-            // PHASE 1 (Move to InitPos for request) 已被移除。
+            // PHASE 1 (Move to InitPos for request) 已被移除
 
             case PHASE_MOVE_TO_PEARL_START: // 3: 启动回城移动 (直接从第二步开始)
                 currentTargetMove = currentTargetPearl.position;
                 String pearlPosString = String.format("%.0f %.0f %.0f", currentTargetMove.x, currentTargetMove.y, currentTargetMove.z);
 
                 client.player.networkHandler.sendChatMessage("#goto " + pearlPosString);
-                client.player.networkHandler.sendChatMessage(buildJumpMessage("正在定位目标空间坐标"));
+                client.player.networkHandler.sendChatCommand(buildJumpMessage("跃迁引擎正在启动..."));
                 tickTimer.set(detectionStartDelayTicks);
                 phase = PHASE_MOVE_TO_PEARL_GOTO; // 4
                 lastPlayerPos = client.player.getPos();
@@ -375,7 +375,7 @@ public class JumpDriveModule implements IModule {
 
             case PHASE_CHECK_PLAYER: // 6: 执行玩家检测
                 if (detectionService.isPlayerReturned(playerName)) {
-                    client.player.networkHandler.sendChatMessage("msg " + playerName + " 尊敬的 " + playerName + " , 您已成功跃迁至目标位置，欢迎回家");
+                    client.player.networkHandler.sendChatCommand(buildJumpMessage("尊敬的" + playerName + ", 您已成功跃迁至指定位置"));
                     phase = PHASE_COMPLETE; // 7
                     handlePhase();
                 } else {
@@ -384,7 +384,7 @@ public class JumpDriveModule implements IModule {
 
                     if (!enableJumpDriveRetry || nextPearl == null) {
                         String failureMessage = nextPearl == null ? "已尝试所有可用的跃迁点" : "重试逻辑已被禁用";
-                        client.player.networkHandler.sendChatMessage("msg " + playerName + " 您的传送似乎失败，且 " + failureMessage + "。");
+                        client.player.networkHandler.sendChatCommand(buildJumpMessage(playerName + " 您的传送似乎失败, 因为" + failureMessage + ""));
                         finishProcessing(playerName, true);
                         return;
                     }
@@ -396,13 +396,13 @@ public class JumpDriveModule implements IModule {
                     retryWaitTimeoutTimestamp = System.currentTimeMillis() + retryWaitTimeoutMs;
 
                     long waitSeconds = retryWaitTimeoutMs / 1000;
-                    client.player.networkHandler.sendChatMessage("msg " + playerName + " 跃迁失败，未在目标点检测到您。是否尝试下一个跃迁点？(请在 " + waitSeconds + " 秒内私信回复 Y 或 N)");
+                    client.player.networkHandler.sendChatCommand(buildJumpMessage(playerName + "跃迁失败, 未在目标点检测到您是否尝试下一个跃迁点？(请在 " + waitSeconds + " 秒内私信回复 Y 或 N)"));
 
                     phase = PHASE_RETRY_WAIT;
                 }
                 break;
 
-            case PHASE_COMPLETE: // 7: 流程完成，清理状态
+            case PHASE_COMPLETE: // 7: 流程完成, 清理状态
                 finishProcessing(playerName);
                 break;
         }
@@ -414,7 +414,7 @@ public class JumpDriveModule implements IModule {
         PlayerPearlData initialPearl = findNextAvailablePearl(playerName, 0);
 
         if (initialPearl == null) {
-            client.player.networkHandler.sendChatMessage("msg " + playerName + " 跃迁引擎启动失败：未找到可用的回城坐标。");
+            client.player.networkHandler.sendChatCommand(buildJumpMessage(" 跃迁引擎启动失败：未找到可用的回城坐标"));
             finishProcessing(playerName, true);
             return;
         }
@@ -423,7 +423,7 @@ public class JumpDriveModule implements IModule {
         currentTargetPearl = initialPearl;
         currentProcessingPlayer = playerName;
 
-        // ** 队列中有待处理的请求时，直接从 Phase 3 (Move to Pearl) 开始 **
+        // ** 队列中有待处理的请求时, 直接从 Phase 3 (Move to Pearl) 开始 **
         phase = PHASE_MOVE_TO_PEARL_START; // 3
 
         handlePhase();
@@ -434,7 +434,7 @@ public class JumpDriveModule implements IModule {
         PlayerPearlData nextPearl = findNextAvailablePearl(playerName, currentIdx + 1);
 
         if (nextPearl == null) {
-            client.player.networkHandler.sendChatMessage("msg " + playerName + " 跃迁引擎启动失败：已尝试所有可用跃迁点。");
+            client.player.networkHandler.sendChatCommand(buildJumpMessage(playerName + " 跃迁引擎启动失败：已尝试所有可用跃迁点"));
             finishProcessing(playerName, true);
             return;
         }
@@ -442,7 +442,7 @@ public class JumpDriveModule implements IModule {
         playerPearlIndexMap.put(playerName, nextPearl.id);
         currentTargetPearl = nextPearl;
 
-        client.player.networkHandler.sendChatMessage("msg " + playerName + " 正在尝试切换到下一个跃迁点。");
+        client.player.networkHandler.sendChatCommand(buildJumpMessage(playerName + " 正在尝试切换到下一个跃迁点"));
         phase = PHASE_MOVE_TO_PEARL_START; // 3
         handlePhase();
     }
@@ -488,7 +488,7 @@ public class JumpDriveModule implements IModule {
                 startRetryJumpDrive(sender);
                 return;
             } else if (upperMessage.equals("N")) {
-                client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁请求已取消，请稍后重试。");
+                client.player.networkHandler.sendChatCommand(buildJumpMessage(sender + " 跃迁请求已取消, 请稍后重试"));
                 retryWaitPlayer = null;
                 retryWaitTimeoutTimestamp = 0;
                 finishProcessing(sender, true);
@@ -508,14 +508,14 @@ public class JumpDriveModule implements IModule {
         }
 
         if (findNextAvailablePearl(sender, 0) == null) {
-            String msg = isPlayerInPearlFile(sender) ? "所有回城坐标已被暂时排除，请稍后重试。" : "您需要初始化回城坐标。";
+            String msg = isPlayerInPearlFile(sender) ? "所有回城坐标已被暂时排除, 请稍后重试" : "您需要初始化回城坐标";
             ignoredMap.put(sender, currentTime + ignoreMs);
-            client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁引擎初始化失败：" + msg);
+            client.player.networkHandler.sendChatCommand(buildJumpMessage(" 跃迁引擎初始化失败：" + msg));
             return;
         }
 
         if (currentProcessingPlayer != null) {
-            client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁引擎繁忙，请稍候。");
+            client.player.networkHandler.sendChatCommand(buildJumpMessage("请稍后.."));
         }
         requestQueue.add(sender);
     }
@@ -523,7 +523,7 @@ public class JumpDriveModule implements IModule {
     // --- 清理和辅助逻辑 ---
 
     private void finishProcessing(String playerName, boolean isFailure) {
-        logDebug(isFailure ? "故障处理完成。" : "流程成功完成。" + "玩家 " + playerName + " 状态清理。");
+        logDebug(isFailure ? "故障处理完成" : "流程成功完成" + "玩家 " + playerName + " 状态清理");
 
         currentProcessingPlayer = null;
         currentTargetPearl = null;
@@ -531,7 +531,7 @@ public class JumpDriveModule implements IModule {
 
         if (isFailure && playerName != null) {
             cooldownMap.put(playerName, System.currentTimeMillis() + cooldownMs);
-            logDebug("玩家 " + playerName + " 已进入冷却期。");
+            logDebug("玩家 " + playerName + " 已进入冷却期");
         }
 
         playerPearlIndexMap.remove(playerName);
@@ -542,20 +542,20 @@ public class JumpDriveModule implements IModule {
 
         // ** 检测队列剩余请求 **
         if (!requestQueue.isEmpty()) {
-            // ** 队列中仍有请求 (≥1)，准备处理下一个请求 **
+            // ** 队列中仍有请求 (≥1), 准备处理下一个请求 **
             if (isFailure) tickTimer.set(1);
             else tickTimer.set(queueDelayTicks);
 
             String nextPlayer = requestQueue.peek();
             if (nextPlayer != null) {
-                client.player.networkHandler.sendChatMessage("msg " + nextPlayer + " 跃迁引擎已恢复，您的请求正在处理。");
+                client.player.networkHandler.sendChatCommand(buildJumpMessage(nextPlayer + " 跃迁引擎已恢复, 您的请求正在处理"));
             }
-            phase = 0; // 切换到空闲/就绪状态，让 tick() 在下一刻拉取新任务
+            phase = 0; // 切换到空闲/就绪状态, 让 tick() 在下一刻拉取新任务
         }
-        // ** 队列为空 (≤0)，执行返回初始化位置逻辑 **
+        // ** 队列为空 (≤0), 执行返回初始化位置逻辑 **
         else {
             if (pearlData != null && pearlData.initPosition != null && !isAtInitPos()) {
-                logDebug("任务结束，队列为空：不在 InitPos，启动 Idle Move (Phase -1)。");
+                logDebug("任务结束, 队列为空：不在 InitPos, 启动 Idle Move (Phase -1)");
                 currentTargetMove = pearlData.initPosition;
                 String initPosString = String.format("%.0f %.0f %.0f", currentTargetMove.x, currentTargetMove.y, currentTargetMove.z);
                 client.player.networkHandler.sendChatMessage("#goto " + initPosString);
@@ -646,7 +646,7 @@ public class JumpDriveModule implements IModule {
 
     private void createDefaultPearlFile() throws IOException {
         String defaultContent =
-                "# 这是回城模块的珍珠坐标文件。\n" +
+                "# 这是回城模块的珍珠坐标文件\n" +
                         "# Activity:X1 Y1 Z1 X2 Y2 Z2 (活动范围, 可选)\n" +
                         "Activity:1000 64 1000 2000 64 2000\n" +
                         "# InitPos:X Y Z (模块空闲时的返回坐标, 可选)\n" +
@@ -671,7 +671,7 @@ public class JumpDriveModule implements IModule {
 
     private String buildJumpMessage(String baseMessage) {
         String pureMessage = jumpDriveMessagePrefix + " " + baseMessage;
-        return "msg " + currentProcessingPlayer + " " + pureMessage + " " + generateRandomSuffix();
+        return "msg " + currentProcessingPlayer + " " + pureMessage + " ";
     }
 
     private void sendFeedback(Text message) {
@@ -686,4 +686,5 @@ public class JumpDriveModule implements IModule {
         requestQueue.clear();
         phase = 0;
     }
+
 }
