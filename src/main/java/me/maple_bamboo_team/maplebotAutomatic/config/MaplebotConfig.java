@@ -10,7 +10,7 @@ public class MaplebotConfig {
     public boolean enableInteractModule = true;
     public boolean enableMovementMonitorModule = true;
     public boolean enablePlayerFinderModule = true;
-    public boolean enableJumpDriveModule = true; // 【新增】
+    public boolean enableJumpDriveModule = true;
 
 
     // --- 模块配置实例 ---
@@ -21,7 +21,7 @@ public class MaplebotConfig {
 
     public PlayerFinderSettings finderSettings = new PlayerFinderSettings();
 
-    public JumpDriveSettings jumpDriveSettings = new JumpDriveSettings(); // 【新增】
+    public JumpDriveSettings jumpDriveSettings = new JumpDriveSettings();
 
     // ----------------------------------------------------
     // --- 内部类：模块配置数据结构 ---
@@ -52,7 +52,7 @@ public class MaplebotConfig {
         public String monitorCommandName = "posd";
 
         // 允许玩家与目标中心点的误差范围 (半径)。
-        public double allowedError = 0.5;
+        public double allowedError = 1;
     }
 
     /**
@@ -74,6 +74,22 @@ public class MaplebotConfig {
         public String pearlFileName = "Pearl.pos";
         // 重载/清理指令名称
         public String jumpDriveCommand = "JumpDrive";
+
+        /**
+         * 【新增】：用于匹配私信日志格式的正则表达式。
+         * 匹配格式示例: [CHAT] FengLiMeng_悄悄地对你说：回城
+         * Group 1: Sender (发送者), Group 2: Content (消息内容)
+         */
+        // 已更新为兼容中英文的正则
+        public String privateMessageLogRegex = "^(?:\\s*<.*?>)?(.+?)(?:悄悄地对你说| whispers to you)[：:]\\s*(.*)";
+
+
+        /**
+         * 用于匹配回城指令的私信正则表达式。
+         * 例如: "回城" 将匹配 "回城"。
+         * 模块内部将使用 Pattern.CASE_INSENSITIVE 忽略大小写。
+         */
+        public String jumpDriveMessageRegex = "回城";
     }
 
     // --- 默认构造函数（可用于加载时的默认配置） ---

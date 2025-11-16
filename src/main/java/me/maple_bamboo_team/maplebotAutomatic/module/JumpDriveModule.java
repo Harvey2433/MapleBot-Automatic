@@ -3,6 +3,7 @@ package me.maple_bamboo_team.maplebotAutomatic.module;
 import me.maple_bamboo_team.maplebotAutomatic.config.MaplebotConfig;
 import me.maple_bamboo_team.maplebotAutomatic.module.JumpDrive.PearlPosition;
 import me.maple_bamboo_team.maplebotAutomatic.module.JumpDrive.PearlPosition.PlayerPearlData;
+import me.maple_bamboo_team.maplebotAutomatic.client.JumpDriveMessageParser;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.minecraft.client.MinecraftClient;
@@ -21,16 +22,22 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 /**
  * JumpDrive (回城) 核心模块，现在完全在内部实现位置抵达和玩家存在检测。
- * 修复了 Phase 4 的无限循环问题。
+ * **修改：已支持从配置文件读取正则表达式。**
  */
 public class JumpDriveModule implements IModule {
 
     private MinecraftClient client;
     private MaplebotConfig config;
     private final Random random = new Random();
+
+    // 配置相关的 Pattern 和解析器实例
+    private Pattern jumpDriveCommandPattern;
+    private JumpDriveMessageParser messageParser;
 
     // 核心数据和文件路径
     private PearlPosition pearlData;
@@ -51,7 +58,7 @@ public class JumpDriveModule implements IModule {
     /** * phase 0: Idle
      * phase 1: Start Init Move (#goto <Init Pos>)
      * phase 2: Wait Init Move Arrival
-     * phase 3: Start Pearl Move (GOTO + Send Messages + Start Detection Delay) <-- 修复后的逻辑集中点
+     * phase 3: Start Pearl Move (GOTO + Send Messages + Start Detection Delay)
      * phase 4: Wait Pearl Move Arrival (Pure Wait State)
      * phase 5: Run /muse and Wait Player Check Delay
      * phase 6: Check Player Returned & Finish
@@ -59,22 +66,16 @@ public class JumpDriveModule implements IModule {
     private int phase = 0;
 
     // 常量
-    private static final int COOLDOWN_MS = 60000; // 1分钟
-    private static final int IGNORE_MS = 60000; // 1分钟
-    private static final int QUEUE_DELAY_TICKS = 100; // 5秒
-    private static final int DELAY_0_7S_TICKS = 14; // 0.7秒 (Muse 延迟)
-    private static final int INIT_MOVE_DELAY_TICKS = 10; // Init Move 消息间隔
-
-    // 3 秒检测启动延迟: 3 * 20 ticks
+    private static final int COOLDOWN_MS = 60000;
+    private static final int IGNORE_MS = 60000;
+    private static final int QUEUE_DELAY_TICKS = 100;
+    private static final int DELAY_0_7S_TICKS = 14;
+    private static final int INIT_MOVE_DELAY_TICKS = 10;
     private static final int DETECTION_START_DELAY_TICKS = 60;
-
-    // 玩家检测的等待时间 (Phase 5 到 Phase 6 的延迟)
-    private static final int PLAYER_CHECK_WAIT_TICKS = 30; // 1.5 秒后检测玩家是否被传送回来
-
-    private static final int MAX_GOTO_WAIT_TICKS = 600; // GOTO 超时，30 秒
+    private static final int PLAYER_CHECK_WAIT_TICKS = 30;
+    private static final int MAX_GOTO_WAIT_TICKS = 600;
     private int gotoWaitTimer = 0;
 
-    // Y 轴容差
     private static final int Y_TOLERANCE = 3;
 
     // --------------------------------------------------------------------
@@ -87,10 +88,40 @@ public class JumpDriveModule implements IModule {
         return "JumpDriveModule";
     }
 
+    // 编译配置中的正则
+    private void compileRegex() {
+        // 1. 编译私信解析用的正则 (由 MaplebotAutomaticClient 使用)
+        try {
+            // 注意：如果您的配置中没有 privateMessageLogRegex 字段，这里会抛出编译错误。
+            // 确保您已在配置类中添加了该字段。
+            Pattern privateMessageLogPattern = Pattern.compile(config.jumpDriveSettings.privateMessageLogRegex);
+            this.messageParser = new JumpDriveMessageParser(privateMessageLogPattern);
+            logDebug("已编译私信解析正则并初始化解析器。");
+        } catch (Exception e) {
+            logDebug("警告: 私信解析正则表达式编译失败或配置字段缺失，私信解析将无法工作。请检查 privateMessageLogRegex 配置。错误: " + e.getMessage());
+            this.messageParser = null; // 禁用解析器
+        }
+
+        // 2. 编译回城指令正则 (由 onPrivateMessage 使用)
+        try {
+            this.jumpDriveCommandPattern = Pattern.compile(
+                    config.jumpDriveSettings.jumpDriveMessageRegex,
+                    Pattern.CASE_INSENSITIVE
+            );
+            logDebug("回城指令: " + config.jumpDriveSettings.jumpDriveMessageRegex);
+        } catch (Exception e) {
+            logDebug("警告: 非法回城指令，使用硬编码 '回城'. 错误: " + e.getMessage());
+            this.jumpDriveCommandPattern = Pattern.compile("回城", Pattern.CASE_INSENSITIVE);
+        }
+    }
+
     @Override
     public void initialize(MinecraftClient client, MaplebotConfig config) {
         this.client = client;
         this.config = config;
+
+        // 初始化时编译正则和解析器
+        compileRegex();
 
         if (client.runDirectory != null) {
             this.pearlFilePath = Paths.get(client.runDirectory.getAbsolutePath(), config.jumpDriveSettings.pearlFileName);
@@ -108,8 +139,9 @@ public class JumpDriveModule implements IModule {
                         .then(ClientCommandManager.literal("reload").executes(context -> {
                             ignoredMap.clear();
                             loadPearlData();
-                            sendFeedback(Text.literal("§a[JumpDrive] 拒绝列表已清理，珍珠数据已重新加载。"));
-                            logDebug("已执行 /jd reload, 拒绝列表被清空，数据重新加载。");
+                            compileRegex(); // 重新加载时重新编译正则
+                            sendFeedback(Text.literal("§a[JumpDrive] 拒绝列表已清理，珍珠数据已重新加载。配置已刷新。"));
+                            logDebug("已执行 /jd reload, 拒绝列表被清空，数据重新加载，配置已刷新。");
                             return 1;
                         }))
                 );
@@ -120,11 +152,16 @@ public class JumpDriveModule implements IModule {
         }
     }
 
+    // 提供给 MaplebotAutomaticClient 访问解析器的公共方法
+    public JumpDriveMessageParser getMessageParser() {
+        return this.messageParser;
+    }
+
     @Override
     public void tick() {
         if (!config.enableJumpDriveModule || client.player == null) return;
 
-        // 【核心检测】：在 Phase 2 (Init) 和 Phase 4 (Pearl) 期间，主动检查玩家是否抵达
+        // 核心检测
         if (phase == 2 || phase == 4) {
             // 检查 GOTO 超时
             gotoWaitTimer--;
@@ -136,19 +173,15 @@ public class JumpDriveModule implements IModule {
                 return;
             }
 
-            // 【延迟控制】：只有在 tickTimer 归零后才开始位置检测
-            // 注意：Phase 4 已经将消息发送和延迟启动合并到 Phase 3 中，因此这里只依赖抵达检测
             if (tickTimer.get() == 0 && isArrivalConfirmed(currentTargetMove)) {
                 logDebug("Phase " + phase + ": JumpDrive 内部检测到抵达！");
 
                 if (phase == 2) {
-                    // 初始化移动完成，进入下一阶段 (Start Pearl Move)
                     logDebug("初始化移动完成，推进到 Phase 3。");
                     client.player.sendMessage(Text.literal("§a[Maplebot] 初始化位置抵达。"), false);
                     phase = 3;
-                    handlePhase(); // 立即启动 Phase 3
+                    handlePhase();
                 } else { // phase == 4
-                    // 珍珠移动完成，进入下一阶段 (Muse Delay)
                     logDebug("回城位置抵达，推进到 Phase 5。");
                     client.player.sendMessage(Text.literal("§a[Maplebot] 已抵达目标位置: " + String.format("%.2f, %.2f, %.2f", client.player.getX(), client.player.getY(), client.player.getZ())), false);
                     tickTimer.set(DELAY_0_7S_TICKS);
@@ -157,12 +190,10 @@ public class JumpDriveModule implements IModule {
             }
         }
 
-        // 【玩家检测延迟】：Phase 5 阶段，延迟结束立即进行玩家检测并进入 Phase 6
         if (phase == 5 && tickTimer.get() == 0) {
             handlePhase();
         }
 
-        // 计时器递减
         if (tickTimer.get() > 0) {
             tickTimer.decrementAndGet();
             if (tickTimer.get() % 20 == 0 && tickTimer.get() > 0) {
@@ -170,12 +201,10 @@ public class JumpDriveModule implements IModule {
             }
         }
 
-        // 只有计时器归零时才执行状态推进（Phase 5 已在上面单独处理）
         if (tickTimer.get() == 0 && phase != 5) {
             handlePhase();
         }
 
-        // 检查队列和启动下一个请求
         if (currentProcessingPlayer == null && !requestQueue.isEmpty() && tickTimer.get() == 0) {
             currentProcessingPlayer = requestQueue.poll();
             logDebug("队列延迟结束，开始处理队列中的玩家: " + currentProcessingPlayer);
@@ -279,7 +308,7 @@ public class JumpDriveModule implements IModule {
             case 2: // 等待初始化移动抵达 (在 tick() 中轮询)
                 break;
 
-            case 3: // 【修复后的逻辑】：启动回城移动 (GOTO + 消息发送 + 启动检测延迟)
+            case 3: // 启动回城移动 (GOTO + 消息发送 + 启动检测延迟)
                 currentTargetMove = currentTargetPearl.position;
                 String pearlPosString = String.format("%.0f %.0f %.0f", currentTargetMove.x, currentTargetMove.y, currentTargetMove.z);
 
@@ -291,7 +320,7 @@ public class JumpDriveModule implements IModule {
                 // 2. 发送两条消息
                 client.player.networkHandler.sendChatMessage(buildJumpMessage("正在定位目标空间坐标"));
 
-                // 3. 启动位置检测延迟 (修复了 Phase 4 的无限重置问题)
+                // 3. 启动位置检测延迟
                 tickTimer.set(DETECTION_START_DELAY_TICKS);
 
                 phase = 4;
@@ -299,9 +328,7 @@ public class JumpDriveModule implements IModule {
                 logDebug("Phase 3 -> 4: 启动 GOTO，发送所有消息，设置检测延迟 " + DETECTION_START_DELAY_TICKS + " ticks。");
                 break;
 
-            case 4: // 【修复后的逻辑】：等待回城移动抵达 (纯等待状态)
-                // 这个状态不应该在 tickTimer 归零时做任何事，它只依赖 tick() 中的 isArrivalConfirmed 触发 Phase 5。
-                // 如果需要调试，可以在这里添加日志，但不能重置状态或发送消息。
+            case 4: // 等待回城移动抵达 (纯等待状态)
                 break;
 
             case 5: // 抵达，运行 /muse 并等待玩家检测延迟
@@ -321,10 +348,10 @@ public class JumpDriveModule implements IModule {
 
 
                 if (playerFound) {
-                    client.player.networkHandler.sendChatMessage("尊敬的 " + playerName + " , 您已成功跃迁至目标位置，欢迎回家");
+                    client.player.networkHandler.sendChatMessage("msg " + playerName + " 尊敬的 " + playerName + " , 您已成功跃迁至目标位置，欢迎回家");
                     logDebug("玩家 " + playerName + " 被成功检测到在附近。");
                 } else {
-                    client.player.networkHandler.sendChatMessage("尊敬的 " + playerName + " , 您的传送似乎失败, 请联系管理员反馈此问题");
+                    client.player.networkHandler.sendChatMessage("msg " + playerName + " 尊敬的 " + playerName + " , 您的传送似乎失败, 请联系管理员反馈此问题");
                     logDebug("玩家 " + playerName + " 未在附近被检测到。");
                 }
 
@@ -351,8 +378,20 @@ public class JumpDriveModule implements IModule {
         logDebug("收到私信. Sender: " + sender + ", Content: " + message);
         if (!config.enableJumpDriveModule || client.player == null) return;
 
-        if (!message.trim().equalsIgnoreCase("回城")) {
-            logDebug("私信内容不匹配 '回城'，忽略。");
+        // 使用配置加载的 Pattern 检查指令
+        String trimmedMessage = message.trim();
+        boolean commandMatches = false;
+
+        if (jumpDriveCommandPattern != null) {
+            Matcher matcher = jumpDriveCommandPattern.matcher(trimmedMessage);
+            commandMatches = matcher.matches();
+        } else if (trimmedMessage.equalsIgnoreCase("回城")) {
+            // 兜底方案，如果配置加载失败，仍然检查硬编码的 "回城"
+            commandMatches = true;
+        }
+
+        if (!commandMatches) {
+            logDebug("私信内容不匹配配置的指令正则: " + (jumpDriveCommandPattern != null ? jumpDriveCommandPattern.pattern() : "硬编码'回城'") + "，忽略。");
             return;
         }
 
@@ -369,7 +408,7 @@ public class JumpDriveModule implements IModule {
 
         if (!isPlayerInPearlFile(sender)) {
             ignoredMap.put(sender, currentTime + IGNORE_MS);
-            client.player.networkHandler.sendChatMessage(sender + " 跃迁引擎初始化失败：您需要初始化回城坐标。");
+            client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁引擎初始化失败：您需要初始化回城坐标。");
             logDebug(sender + " 珍珠数据不存在，已拒绝并加入忽略列表。");
             return;
         }
@@ -380,7 +419,7 @@ public class JumpDriveModule implements IModule {
         }
 
         if (currentProcessingPlayer != null) {
-            client.player.networkHandler.sendChatMessage(sender + " 跃迁引擎繁忙，请稍候。");
+            client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁引擎繁忙，请稍候。");
             logDebug(sender + " 加入队列。当前处理者: " + currentProcessingPlayer);
         } else {
             logDebug(sender + " 加入队列。当前无处理者。");
@@ -389,7 +428,7 @@ public class JumpDriveModule implements IModule {
     }
 
     public void onChatMessage(String message) {
-        // ...
+        // ... 其他聊天处理逻辑（如果存在）
     }
 
 
@@ -400,7 +439,7 @@ public class JumpDriveModule implements IModule {
         currentTargetPearl = findValidPearl(playerName);
 
         if (currentTargetPearl == null) {
-            client.player.networkHandler.sendChatMessage(playerName + " 跃迁引擎启动失败：未经处理的异常");
+            client.player.networkHandler.sendChatMessage("msg " + playerName + " 跃迁引擎启动失败：未经处理的异常");
             logDebug("启动失败：未找到有效珍珠坐标。");
             finishProcessing(playerName);
             return;
@@ -424,14 +463,14 @@ public class JumpDriveModule implements IModule {
 
         if (!requestQueue.isEmpty()) {
             tickTimer.set(QUEUE_DELAY_TICKS);
-            client.player.networkHandler.sendChatMessage(requestQueue.peek() + " 跃迁引擎已恢复，您的请求正在处理。");
+            client.player.networkHandler.sendChatMessage("msg " + requestQueue.peek() + " 跃迁引擎已恢复，您的请求正在处理。");
             logDebug("队列中还有请求。设置 5 秒延迟，下一个处理者: " + requestQueue.peek());
         } else {
             logDebug("队列为空，系统进入 Idle。");
         }
     }
 
-    // --- 文件和数据逻辑 ---
+    // --- 文件和数据逻辑 (保持不变) ---
 
     private boolean isPlayerInPearlFile(String playerName) {
         if (pearlData == null) return false;
@@ -449,7 +488,7 @@ public class JumpDriveModule implements IModule {
                 if (isPosInActivityRange(data.position)) {
                     return data;
                 } else {
-                    client.player.networkHandler.sendChatMessage(playerName + String.format(" [JumpDrive] 您的%d号珍珠为非法活动范围，跳过。", data.id));
+                    client.player.networkHandler.sendChatMessage("msg " + playerName + String.format(" [JumpDrive] 您的%d号珍珠为非法活动范围，跳过。", data.id));
                 }
             }
         }
@@ -602,7 +641,7 @@ public class JumpDriveModule implements IModule {
 
     private String buildJumpMessage(String baseMessage) {
         String pureMessage = "[JumpDrive] " + baseMessage;
-        return currentProcessingPlayer + " " + pureMessage + " " + generateRandomSuffix();
+        return "msg " + currentProcessingPlayer + " " + pureMessage + " " + generateRandomSuffix();
     }
 
     private void sendFeedback(Text message) {

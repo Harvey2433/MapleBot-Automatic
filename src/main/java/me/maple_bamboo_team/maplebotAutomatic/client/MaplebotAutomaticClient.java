@@ -6,7 +6,8 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
-
+import me.maple_bamboo_team.maplebotAutomatic.module.JumpDriveModule;
+import me.maple_bamboo_team.maplebotAutomatic.client.JumpDriveMessageParser.MessageData;
 
 
 public class MaplebotAutomaticClient implements ClientModInitializer {
@@ -36,24 +37,33 @@ public class MaplebotAutomaticClient implements ClientModInitializer {
             }
         });
 
-        // 【关键修复点】：将 Lambda 表达式的参数从 6 个修正为 5 个
-        // 移除原有的第六个参数 (filtered)
+        // 聊天事件监听器使用配置驱动的解析器实例
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, original) -> {
 
             if (moduleManager == null || moduleManager.JUMP_DRIVE_MODULE == null) return;
+
+            JumpDriveModule jumpDriveModule = moduleManager.JUMP_DRIVE_MODULE;
 
             // 获取聊天消息的纯文本内容 (Text -> String)
             String fullMessage = message.getString();
 
             // 4a. 尝试解析是否为私信 (PM)
-            JumpDriveMessageParser.MessageData data = JumpDriveMessageParser.parsePrivateMessage(fullMessage);
+            JumpDriveMessageParser parser = jumpDriveModule.getMessageParser();
 
-            if (data != null) {
-                moduleManager.JUMP_DRIVE_MODULE.onPrivateMessage(data.sender, data.content);
+            if (parser != null) {
+                // 使用模块提供的配置驱动的解析器实例
+                MessageData data = parser.parsePrivateMessage(fullMessage);
+
+                if (data != null) {
+                    jumpDriveModule.onPrivateMessage(data.sender, data.content);
+                }
+            } else {
+                // 如果解析器未初始化（配置正则错误），则不处理私信
             }
 
+
             // 4b. 将所有消息（包括指令反馈）转发给 onChatMessage
-            moduleManager.JUMP_DRIVE_MODULE.onChatMessage(fullMessage);
+            jumpDriveModule.onChatMessage(fullMessage);
 
             // 这是一个 Consumer 接口，不需要返回 boolean
         });
