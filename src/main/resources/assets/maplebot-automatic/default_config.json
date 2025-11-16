@@ -1,6 +1,5 @@
 {
   "enableInteractModule": true,
-  "enableMovementMonitorModule": true,
   "enablePlayerFinderModule": true,
   "enableJumpDriveModule": true,
   "interactSettings": {
@@ -9,10 +8,6 @@
     "aimYOffset": 0.05,
     "rotationSpeed": 0.35
   },
-  "monitorSettings": {
-    "monitorCommandName": "posd",
-    "allowedError": 1
-  },
   "finderSettings": {
     "finderCommandName": "findplayer",
     "maxSearchDistance": 4.5
@@ -20,6 +15,7 @@
   "jumpDriveSettings": {
     "pearlFileName": "Pearl.pos",
     "jumpDriveCommand": "JumpDrive",
+    "allowedError": 1.0,
     "privateMessageLogRegex": "^(?:\\s*<.*?>)?(.+?)(?:悄悄地对你说| whispers to you)[：:]\\s*(.*)",
     "jumpDriveMessageRegex": "回城"
   }

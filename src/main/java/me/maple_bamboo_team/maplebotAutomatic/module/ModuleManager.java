@@ -20,7 +20,6 @@ public class ModuleManager {
     // 假设您还需要访问其他模块
     public final RotationModule ROTATION_MODULE;
     public final InteractModule INTERACT_MODULE;
-    public final MovementMonitorModule MOVEMENT_MONITOR_MODULE;
     public final PlayerFinderModule PLAYER_FINDER_MODULE;
 
     public ModuleManager(MinecraftClient client, MaplebotConfig config) {
@@ -31,7 +30,6 @@ public class ModuleManager {
         this.ROTATION_MODULE = new RotationModule();
         // 注意：InteractModule, MovementMonitorModule 和 PlayerFinderModule 需要被实例化
         this.INTERACT_MODULE = new InteractModule(this);
-        this.MOVEMENT_MONITOR_MODULE = new MovementMonitorModule();
         this.PLAYER_FINDER_MODULE = new PlayerFinderModule();
 
         // 【核心修复】：实例化 JumpDriveModule
@@ -46,10 +44,7 @@ public class ModuleManager {
         // 2. 注册 InteractModule
         registerModule(INTERACT_MODULE);
 
-        // 3. 注册 MovementMonitorModule
-        registerModule(MOVEMENT_MONITOR_MODULE);
-
-        // 4. 注册 PlayerFinderModule
+        // 3. 注册 PlayerFinderModule
         registerModule(PLAYER_FINDER_MODULE);
 
         // 【核心修复】：注册 JumpDriveModule

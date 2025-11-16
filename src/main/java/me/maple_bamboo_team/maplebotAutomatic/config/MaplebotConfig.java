@@ -8,7 +8,7 @@ public class MaplebotConfig {
     // --- 全局模块启用开关 ---
 
     public boolean enableInteractModule = true;
-    public boolean enableMovementMonitorModule = true;
+    // 已删除: public boolean enableMovementMonitorModule = true;
     public boolean enablePlayerFinderModule = true;
     public boolean enableJumpDriveModule = true;
 
@@ -17,7 +17,7 @@ public class MaplebotConfig {
 
     public InteractSettings interactSettings = new InteractSettings();
 
-    public MovementMonitorSettings monitorSettings = new MovementMonitorSettings();
+    // 已删除: public MovementMonitorSettings monitorSettings = new MovementMonitorSettings();
 
     public PlayerFinderSettings finderSettings = new PlayerFinderSettings();
 
@@ -45,17 +45,6 @@ public class MaplebotConfig {
     }
 
     /**
-     * MovementMonitorModule (位置监控模块) 的配置
-     */
-    public static class MovementMonitorSettings {
-        // 用于设置目标位置的指令名称，例如 /posd
-        public String monitorCommandName = "posd";
-
-        // 允许玩家与目标中心点的误差范围 (半径)。
-        public double allowedError = 1;
-    }
-
-    /**
      * PlayerFinderModule (玩家查找模块) 的配置
      */
     public static class PlayerFinderSettings {
@@ -75,12 +64,15 @@ public class MaplebotConfig {
         // 重载/清理指令名称
         public String jumpDriveCommand = "JumpDrive";
 
+        // 【新增】：允许玩家与目标中心点的误差范围 (半径)。
+        // 原属于 MovementMonitorSettings，现移至此作为 GOTO 抵达阈值。
+        public double allowedError = 0.9;
+
         /**
          * 【新增】：用于匹配私信日志格式的正则表达式。
          * 匹配格式示例: [CHAT] FengLiMeng_悄悄地对你说：回城
          * Group 1: Sender (发送者), Group 2: Content (消息内容)
          */
-        // 已更新为兼容中英文的正则
         public String privateMessageLogRegex = "^(?:\\s*<.*?>)?(.+?)(?:悄悄地对你说| whispers to you)[：:]\\s*(.*)";
 
 

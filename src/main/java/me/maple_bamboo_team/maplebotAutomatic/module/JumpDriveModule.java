@@ -1,16 +1,14 @@
 package me.maple_bamboo_team.maplebotAutomatic.module;
 
+import me.maple_bamboo_team.maplebotAutomatic.client.JumpDriveMessageParser;
 import me.maple_bamboo_team.maplebotAutomatic.config.MaplebotConfig;
 import me.maple_bamboo_team.maplebotAutomatic.module.JumpDrive.PearlPosition;
 import me.maple_bamboo_team.maplebotAutomatic.module.JumpDrive.PearlPosition.PlayerPearlData;
-import me.maple_bamboo_team.maplebotAutomatic.client.JumpDriveMessageParser;
+import me.maple_bamboo_team.maplebotAutomatic.module.detection.IDetectionService;
+import me.maple_bamboo_team.maplebotAutomatic.module.detection.InternalDetectionService;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -22,18 +20,20 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * JumpDrive (回城) 核心模块，现在完全在内部实现位置抵达和玩家存在检测。
- * **修改：已支持从配置文件读取正则表达式。**
+ * JumpDrive (回城) 核心模块，现已通过 IDetectionService 抽象出内部的位置抵达和玩家存在检测。
  */
 public class JumpDriveModule implements IModule {
 
     private MinecraftClient client;
     private MaplebotConfig config;
     private final Random random = new Random();
+
+    // 【检测服务实例】
+    private IDetectionService detectionService;
 
     // 配置相关的 Pattern 和解析器实例
     private Pattern jumpDriveCommandPattern;
@@ -92,8 +92,6 @@ public class JumpDriveModule implements IModule {
     private void compileRegex() {
         // 1. 编译私信解析用的正则 (由 MaplebotAutomaticClient 使用)
         try {
-            // 注意：如果您的配置中没有 privateMessageLogRegex 字段，这里会抛出编译错误。
-            // 确保您已在配置类中添加了该字段。
             Pattern privateMessageLogPattern = Pattern.compile(config.jumpDriveSettings.privateMessageLogRegex);
             this.messageParser = new JumpDriveMessageParser(privateMessageLogPattern);
             logDebug("已编译私信解析正则并初始化解析器。");
@@ -120,6 +118,13 @@ public class JumpDriveModule implements IModule {
         this.client = client;
         this.config = config;
 
+        // 【更新】初始化检测服务，并将配置参数传递给它 (使用新的配置路径 jumpDriveSettings)
+        this.detectionService = new InternalDetectionService(client);
+        this.detectionService.updateDetectionParameters(
+                config.jumpDriveSettings.allowedError,
+                config.finderSettings.maxSearchDistance
+        );
+
         // 初始化时编译正则和解析器
         compileRegex();
 
@@ -140,6 +145,13 @@ public class JumpDriveModule implements IModule {
                             ignoredMap.clear();
                             loadPearlData();
                             compileRegex(); // 重新加载时重新编译正则
+
+                            // 【更新】重新加载配置时，更新检测服务参数
+                            this.detectionService.updateDetectionParameters(
+                                    config.jumpDriveSettings.allowedError,
+                                    config.finderSettings.maxSearchDistance
+                            );
+
                             sendFeedback(Text.literal("§a[JumpDrive] 拒绝列表已清理，珍珠数据已重新加载。配置已刷新。"));
                             logDebug("已执行 /jd reload, 拒绝列表被清空，数据重新加载，配置已刷新。");
                             return 1;
@@ -167,13 +179,14 @@ public class JumpDriveModule implements IModule {
             gotoWaitTimer--;
             if (gotoWaitTimer <= 0) {
                 logDebug("Phase " + phase + ": GOTO 超时（" + MAX_GOTO_WAIT_TICKS + " ticks），放弃当前请求。");
-                client.player.networkHandler.sendChatCommand("goto cancel");
-                client.player.networkHandler.sendChatMessage(currentProcessingPlayer + " 跃迁引擎故障：请检查目标位置是否可达。");
+                client.player.networkHandler.sendChatCommand("#goto cancel");
+                client.player.networkHandler.sendChatMessage("msg " + currentProcessingPlayer + " 跃迁引擎故障：请检查目标位置是否可达。");
                 finishProcessing(currentProcessingPlayer);
                 return;
             }
 
-            if (tickTimer.get() == 0 && isArrivalConfirmed(currentTargetMove)) {
+            // 【使用 detectionService】进行抵达检测
+            if (tickTimer.get() == 0 && detectionService.isArrivalConfirmed(currentTargetMove)) {
                 logDebug("Phase " + phase + ": JumpDrive 内部检测到抵达！");
 
                 if (phase == 2) {
@@ -210,62 +223,6 @@ public class JumpDriveModule implements IModule {
             logDebug("队列延迟结束，开始处理队列中的玩家: " + currentProcessingPlayer);
             startJumpDrive(currentProcessingPlayer);
         }
-    }
-
-    /**
-     * 【内部实现】：位置抵达检测。
-     */
-    private boolean isArrivalConfirmed(Vec3d targetPos) {
-        if (client.player == null || targetPos == null) {
-            return false;
-        }
-
-        Vec3d playerPos = client.player.getPos();
-        double allowedError = config.monitorSettings.allowedError;
-        double distance = playerPos.distanceTo(targetPos);
-
-        if (client.world.getTime() % 20 == 0 && tickTimer.get() == 0) {
-            logDebug("正在内部检测... 距离目标中心: " + String.format("%.3f", distance) + " 方块。 (误差阈值: " + allowedError + ")");
-        }
-
-        return distance <= allowedError;
-    }
-
-    /**
-     * 【内部实现】：检测目标玩家是否已在回城位置附近。
-     */
-    private boolean isPlayerReturned(String targetName) {
-        if (client.player == null || client.world == null || client.getNetworkHandler() == null) {
-            logDebug("检测玩家返回失败：客户端状态不可用。");
-            return false;
-        }
-
-        double maxSearchDistance = config.finderSettings.maxSearchDistance;
-        ClientPlayerEntity player = client.player;
-
-        PlayerListEntry targetEntry = client.getNetworkHandler().getPlayerListEntry(targetName);
-        if (targetEntry == null) {
-            logDebug("检测玩家返回失败：玩家不在线。");
-            return false;
-        }
-
-        Vec3d playerPos = player.getPos();
-
-        for (Entity entity : client.world.getEntities()) {
-            if (entity instanceof PlayerEntity otherPlayer && !otherPlayer.equals(player)) {
-                if (otherPlayer.getName().getString().equalsIgnoreCase(targetName)) {
-                    double distance = playerPos.distanceTo(otherPlayer.getPos());
-
-                    logDebug(String.format("玩家 %s 距离: %.2f (阈值: %.2f)", targetName, distance, maxSearchDistance));
-
-                    if (distance <= maxSearchDistance) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
     }
 
     /**
@@ -344,7 +301,8 @@ public class JumpDriveModule implements IModule {
 
             case 6: // 延迟结束，执行玩家检测并进入 Phase 7
                 logDebug("Phase 6: 玩家检测延迟结束，执行 isPlayerReturned 检测。");
-                boolean playerFound = isPlayerReturned(playerName);
+                // 【使用 detectionService】进行玩家检测
+                boolean playerFound = detectionService.isPlayerReturned(playerName);
 
 
                 if (playerFound) {
@@ -356,7 +314,7 @@ public class JumpDriveModule implements IModule {
                 }
 
                 if (cooldownMap.getOrDefault(playerName, 0L) <= System.currentTimeMillis()) {
-
+                    // 冷却逻辑，此处代码被跳过
                 }
 
                 phase = 7;
@@ -432,7 +390,7 @@ public class JumpDriveModule implements IModule {
     }
 
 
-    // --- 启动和收尾逻辑 ---
+    // --- 启动和收尾逻辑 (保持不变) ---
 
     private void startJumpDrive(String playerName) {
         logDebug("JumpDrive 启动序列: 玩家 " + playerName);
@@ -628,7 +586,7 @@ public class JumpDriveModule implements IModule {
         loadPearlData();
     }
 
-    // --- 辅助方法 ---
+    // --- 辅助方法 (保持不变) ---
 
     private String generateRandomSuffix() {
         String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -641,6 +599,7 @@ public class JumpDriveModule implements IModule {
 
     private String buildJumpMessage(String baseMessage) {
         String pureMessage = "[JumpDrive] " + baseMessage;
+        // 确保使用 "msg " + playername 的格式发送私信指令
         return "msg " + currentProcessingPlayer + " " + pureMessage + " " + generateRandomSuffix();
     }
 
