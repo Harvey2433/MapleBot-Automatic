@@ -17,6 +17,23 @@
     "jumpDriveCommand": "JumpDrive",
     "allowedError": 1.0,
     "privateMessageLogRegex": "^(?:\\s*<.*?>)?(.+?)(?:悄悄地对你说| whispers to you)[：:]\\s*(.*)",
-    "jumpDriveMessageRegex": "回城"
+    "jumpDriveMessageRegex": "回城",
+    "cooldownMs": 60000,
+    "ignoreMs": 60000,
+    "stationaryToleranceTicks": 100,
+    "timeoutAfterStationaryTicks": 300,
+    "preMuseDelayTicks": 14,
+    "playerCheckWaitTicks": 30,
+    "queueDelayTicks": 100,
+    "initMoveDelayTicks": 10,
+    "detectionStartDelayTicks": 60,
+    "yTolerance": 3,
+    "jumpDriveMessagePrefix": "[JumpDrive]",
+    "randomSuffixLength": 3,
+    "deathCancelMessage": "跃迁引擎故障：未经处理的异常，请求已取消。",
+    "retryTimeoutMessage": "未收到重试回复，请求已取消。",
+    "enableJumpDriveRetry": true,
+    "retryWaitTimeoutMs": 25000,
+    "excludedPearlResetMs": 60000
   }
 }

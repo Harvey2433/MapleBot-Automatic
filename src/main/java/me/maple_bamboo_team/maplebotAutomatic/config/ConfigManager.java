@@ -119,4 +119,15 @@ public class ConfigManager {
         }
         return config;
     }
+
+    /**
+     * 强制从磁盘重新加载配置文件并返回最新的配置实例。
+     * 此方法适用于 /reload 指令。
+     * @return 最新的 MaplebotConfig 实例。
+     */
+    public static MaplebotConfig reloadAndGetConfig() {
+        // 强制重新加载，此操作会从磁盘读取文件并更新静态 config 字段。
+        loadConfig();
+        return config;
+    }
 }

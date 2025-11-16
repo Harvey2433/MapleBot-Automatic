@@ -62,8 +62,6 @@ public class MaplebotAutomaticClient implements ClientModInitializer {
             }
 
 
-            // 4b. 将所有消息（包括指令反馈）转发给 onChatMessage
-            jumpDriveModule.onChatMessage(fullMessage);
 
             // 这是一个 Consumer 接口，不需要返回 boolean
         });

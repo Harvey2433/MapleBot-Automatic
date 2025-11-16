@@ -3,6 +3,7 @@ package me.maple_bamboo_team.maplebotAutomatic.module;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import me.maple_bamboo_team.maplebotAutomatic.config.MaplebotConfig;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
@@ -10,6 +11,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
@@ -29,7 +31,7 @@ public class PlayerFinderModule implements IModule {
 
     // 用于正则表达式匹配的固定提示文本
     private static final String FOUND_MESSAGE_PREFIX = "已找到指定玩家:";
-    private static final String NOT_FOUND_MESSAGE_PREFIX = "未在当前范围找到指定玩家";
+    private static final String NOT_FOUND_MESSAGE_PREFIX = "未在附近找到玩家:";
 
     @Override
     public String getName() {
@@ -41,51 +43,39 @@ public class PlayerFinderModule implements IModule {
         this.client = client;
         this.config = config;
 
-        // 【应用配置】
+        // 加载配置
         this.maxSearchDistance = config.finderSettings.maxSearchDistance;
         this.finderCommandName = config.finderSettings.finderCommandName;
 
-        if (config.enablePlayerFinderModule) {
-            ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
-                registerCommands(dispatcher);
-            });
-        }
+        // 注册指令 (修复不兼容的类型错误)
+        ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
     }
 
-    private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
+    // 修正方法签名，匹配 FabricClientCommandSource
+    private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher, CommandRegistryAccess registryAccess) {
         dispatcher.register(ClientCommandManager.literal(finderCommandName)
-                .then(ClientCommandManager.argument("playername", StringArgumentType.string())
-                        .executes(this::executeFindPlayerCommand)
+                .then(ClientCommandManager.argument("player", StringArgumentType.string())
+                        .executes(this::findPlayerCommand)
                 )
         );
-        sendFeedback(Text.literal("§a[Maplebot] 指令 /" + finderCommandName + " 已成功注册。"));
     }
 
-    private int executeFindPlayerCommand(CommandContext<FabricClientCommandSource> context) {
-        if (!config.enablePlayerFinderModule) {
-            sendFeedback(Text.literal("§e[Maplebot] PlayerFinderModule 已禁用。"));
-            return 0;
-        }
+    private int findPlayerCommand(CommandContext<FabricClientCommandSource> context) throws CommandSyntaxException {
+        if (client.player == null || client.world == null) return 0;
 
+        String targetName = StringArgumentType.getString(context, "player");
         ClientPlayerEntity player = client.player;
-        if (player == null || client.world == null || client.getNetworkHandler() == null) {
-            sendFeedback(Text.literal("§c[Maplebot] 客户端状态不可用。"));
-            return 0;
-        }
+        Vec3d playerPos = player.getPos();
+        PlayerEntity foundPlayer = null;
 
-        String targetName = StringArgumentType.getString(context, "playername");
-
-        // 1. 在线检测
+        // 1. 检查目标玩家是否在线 (基础检查)
         PlayerListEntry targetEntry = client.getNetworkHandler().getPlayerListEntry(targetName);
         if (targetEntry == null) {
-            sendFeedback(Text.literal("§e[Maplebot] 玩家 §6" + targetName + " §e当前不在线或名称错误。"));
+            sendNotFoundMessage(targetName + " (不在线)");
             return 0;
         }
 
-        // 2. 距离检测
-        PlayerEntity foundPlayer = null;
-        Vec3d playerPos = player.getPos();
-
+        // 2. 遍历世界实体进行距离检查
         for (Entity entity : client.world.getEntities()) {
             if (entity instanceof PlayerEntity otherPlayer && !otherPlayer.equals(player)) {
                 if (otherPlayer.getName().getString().equalsIgnoreCase(targetName)) {

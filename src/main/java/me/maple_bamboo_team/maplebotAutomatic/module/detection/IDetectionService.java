@@ -29,4 +29,11 @@ public interface IDetectionService {
      * @param maxSearchDistance 允许的玩家查找距离。
      */
     void updateDetectionParameters(double allowedError, double maxSearchDistance);
+
+    /**
+     * 【新增】：获取当前允许的位置误差。
+     *
+     * @return 允许的位置误差值 (allowedError)。
+     */
+    double getAllowedError();
 }

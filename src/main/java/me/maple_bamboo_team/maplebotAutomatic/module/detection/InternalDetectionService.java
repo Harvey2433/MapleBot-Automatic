@@ -36,19 +36,29 @@ public class InternalDetectionService implements IDetectionService {
     }
 
     /**
+     * 【新增】：获取当前允许的位置误差。
+     */
+    @Override
+    public double getAllowedError() {
+        return this.allowedError;
+    }
+
+    /**
      * 【原 JumpDriveModule.isArrivalConfirmed()】
      */
     @Override
     public boolean isArrivalConfirmed(Vec3d targetPos) {
-        if (client.player == null || targetPos == null) {
+        if (client.player == null) {
+            logDebug("抵达检测失败：客户端玩家状态不可用。");
             return false;
         }
 
-        Vec3d playerPos = client.player.getPos();
-        double distance = playerPos.distanceTo(targetPos);
+        Vec3d currentPos = client.player.getPos();
+        double distance = currentPos.distanceTo(targetPos);
 
-        if (client.world.getTime() % 20 == 0) {
-            logDebug("正在内部检测... 距离目标中心: " + String.format("%.3f", distance) + " 方块。 (误差阈值: " + allowedError + ")");
+        // 仅在检测到抵达或距离较远时（例如距离 > 误差阈值的两倍）进行日志记录
+        if (distance <= allowedError || distance > allowedError * 2) {
+            logDebug("[Detection DEBUG] 正在内部检测... 距离目标中心: " + String.format("%.3f", distance) + " 方块。 (误差阈值: " + allowedError + ")");
         }
 
         return distance <= allowedError;
