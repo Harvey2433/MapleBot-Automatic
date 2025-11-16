@@ -37,7 +37,7 @@ public class JumpDriveModule implements IModule {
 
     // 配置相关的 Pattern 和解析器实例
     private Pattern jumpDriveCommandPattern;
-    private JumpDriveMessageParser messageParser;
+    private JumpDriveMessageParser messageParser; // 私有实例
 
     // 核心数据和文件路径
     private PearlPosition pearlData;
@@ -49,6 +49,13 @@ public class JumpDriveModule implements IModule {
     private PlayerPearlData currentTargetPearl = null;
     private Vec3d currentTargetMove = null;
 
+    // 【动态超时检测状态】
+    private Vec3d lastPlayerPos = null;
+    private int stationaryTicks = 0;
+    private int dynamicTimeoutTicks = 0;
+    // 【死亡处理状态】用于在复活后发送反馈
+    private String playerDiedDuringProcessing = null;
+
     // 冷却和拒绝列表
     private final Map<String, Long> cooldownMap = new ConcurrentHashMap<>();
     private final Map<String, Long> ignoredMap = new ConcurrentHashMap<>();
@@ -57,24 +64,25 @@ public class JumpDriveModule implements IModule {
     private final AtomicInteger tickTimer = new AtomicInteger(0);
     /** * phase 0: Idle
      * phase 1: Start Init Move (#goto <Init Pos>)
-     * phase 2: Wait Init Move Arrival
+     * phase 2: Wait Init Move Arrival (Dynamic Timeout Check)
      * phase 3: Start Pearl Move (GOTO + Send Messages + Start Detection Delay)
-     * phase 4: Wait Pearl Move Arrival (Pure Wait State)
+     * phase 4: Wait Pearl Move Arrival (Dynamic Timeout Check)
      * phase 5: Run /muse and Wait Player Check Delay
      * phase 6: Check Player Returned & Finish
      */
     private int phase = 0;
 
-    // 常量
-    private static final int COOLDOWN_MS = 60000;
-    private static final int IGNORE_MS = 60000;
+    // 常量/配置值 (从配置中加载)
+    private int cooldownMs;
+    private int ignoreMs;
+    private int stationaryToleranceTicks;
+    private int timeoutAfterStationaryTicks;
+
     private static final int QUEUE_DELAY_TICKS = 100;
     private static final int DELAY_0_7S_TICKS = 14;
     private static final int INIT_MOVE_DELAY_TICKS = 10;
     private static final int DETECTION_START_DELAY_TICKS = 60;
     private static final int PLAYER_CHECK_WAIT_TICKS = 30;
-    private static final int MAX_GOTO_WAIT_TICKS = 600;
-    private int gotoWaitTimer = 0;
 
     private static final int Y_TOLERANCE = 3;
 
@@ -90,7 +98,7 @@ public class JumpDriveModule implements IModule {
 
     // 编译配置中的正则
     private void compileRegex() {
-        // 1. 编译私信解析用的正则 (由 MaplebotAutomaticClient 使用)
+        // 1. 编译私信解析用的正则
         try {
             Pattern privateMessageLogPattern = Pattern.compile(config.jumpDriveSettings.privateMessageLogRegex);
             this.messageParser = new JumpDriveMessageParser(privateMessageLogPattern);
@@ -100,7 +108,7 @@ public class JumpDriveModule implements IModule {
             this.messageParser = null; // 禁用解析器
         }
 
-        // 2. 编译回城指令正则 (由 onPrivateMessage 使用)
+        // 2. 编译回城指令正则
         try {
             this.jumpDriveCommandPattern = Pattern.compile(
                     config.jumpDriveSettings.jumpDriveMessageRegex,
@@ -118,19 +126,17 @@ public class JumpDriveModule implements IModule {
         this.client = client;
         this.config = config;
 
-        // 【更新】初始化检测服务，并将配置参数传递给它 (使用新的配置路径 jumpDriveSettings)
+        // 初始化检测服务
         this.detectionService = new InternalDetectionService(client);
-        this.detectionService.updateDetectionParameters(
-                config.jumpDriveSettings.allowedError,
-                config.finderSettings.maxSearchDistance
-        );
 
-        // 初始化时编译正则和解析器
-        compileRegex();
-
+        // 路径初始化
         if (client.runDirectory != null) {
             this.pearlFilePath = Paths.get(client.runDirectory.getAbsolutePath(), config.jumpDriveSettings.pearlFileName);
         }
+
+        // 模块初始化时执行一次完整加载和复位
+        reloadConfigAndData();
+        resetModuleState();
 
         if (config.enableJumpDriveModule) {
             logDebug("模块已启用。指令: /" + config.jumpDriveSettings.jumpDriveCommand);
@@ -142,52 +148,145 @@ public class JumpDriveModule implements IModule {
                             return 1;
                         })
                         .then(ClientCommandManager.literal("reload").executes(context -> {
-                            ignoredMap.clear();
-                            loadPearlData();
-                            compileRegex(); // 重新加载时重新编译正则
+                            // 重新加载配置依赖数据 (重新加载 Pearl.pos, 正则, 计时参数)
+                            reloadConfigAndData();
+                            // 重置所有状态和队列 (清空队列、冷却、状态机归零)
+                            resetModuleState();
 
-                            // 【更新】重新加载配置时，更新检测服务参数
-                            this.detectionService.updateDetectionParameters(
-                                    config.jumpDriveSettings.allowedError,
-                                    config.finderSettings.maxSearchDistance
-                            );
-
-                            sendFeedback(Text.literal("§a[JumpDrive] 拒绝列表已清理，珍珠数据已重新加载。配置已刷新。"));
-                            logDebug("已执行 /jd reload, 拒绝列表被清空，数据重新加载，配置已刷新。");
+                            sendFeedback(Text.literal("§a[JumpDrive] 模块已重置，拒绝列表已清理，珍珠数据已重新加载，配置已刷新。"));
+                            logDebug("已执行 /jd reload，模块状态已重置，配置数据已重新加载。");
                             return 1;
                         }))
                 );
             });
-            loadPearlData();
         } else {
             logDebug("模块已禁用 (配置)");
         }
     }
 
-    // 提供给 MaplebotAutomaticClient 访问解析器的公共方法
-    public JumpDriveMessageParser getMessageParser() {
-        return this.messageParser;
+    // --- 新增：重置和重载方法 ---
+
+    /**
+     * 重新加载配置文件依赖的数据：珍珠文件、正则表达式、检测服务参数、所有计时配置。
+     */
+    private void reloadConfigAndData() {
+        // 重新加载珍珠数据
+        loadPearlData();
+        // 重新编译正则
+        compileRegex();
+
+        // 【配置加载】加载计时器和动态检测配置
+        this.cooldownMs = config.jumpDriveSettings.cooldownMs;
+        this.ignoreMs = config.jumpDriveSettings.ignoreMs;
+        this.stationaryToleranceTicks = config.jumpDriveSettings.stationaryToleranceTicks;
+        this.timeoutAfterStationaryTicks = config.jumpDriveSettings.timeoutAfterStationaryTicks;
+
+        // 更新检测服务参数
+        this.detectionService.updateDetectionParameters(
+                config.jumpDriveSettings.allowedError,
+                config.finderSettings.maxSearchDistance
+        );
+        logDebug("配置依赖数据已重新加载：珍珠数据、正则表达式、计时参数、检测服务参数已更新。");
     }
+
+    /**
+     * 重置模块的运行状态：清空队列、清空冷却/拒绝列表，并将状态机归零。
+     */
+    private void resetModuleState() {
+        // 清理所有运行时状态
+        currentProcessingPlayer = null;
+        currentTargetPearl = null;
+        currentTargetMove = null;
+        requestQueue.clear();
+        phase = 0;
+        tickTimer.set(0);
+
+        // 清理动态运动状态
+        lastPlayerPos = null;
+        stationaryTicks = 0;
+        dynamicTimeoutTicks = 0;
+        playerDiedDuringProcessing = null;
+
+        // 清理玩家特定数据
+        ignoredMap.clear();
+        cooldownMap.clear();
+
+        logDebug("模块运行状态已重置。");
+    }
+
+    // --- 核心 Tick 逻辑 ---
 
     @Override
     public void tick() {
         if (!config.enableJumpDriveModule || client.player == null) return;
 
-        // 核心检测
-        if (phase == 2 || phase == 4) {
-            // 检查 GOTO 超时
-            gotoWaitTimer--;
-            if (gotoWaitTimer <= 0) {
-                logDebug("Phase " + phase + ": GOTO 超时（" + MAX_GOTO_WAIT_TICKS + " ticks），放弃当前请求。");
-                client.player.networkHandler.sendChatCommand("#goto cancel");
-                client.player.networkHandler.sendChatMessage("msg " + currentProcessingPlayer + " 跃迁引擎故障：请检查目标位置是否可达。");
-                finishProcessing(currentProcessingPlayer);
-                return;
+        // 【死亡检测和复活反馈】
+        if (client.player.isDead()) {
+            if (phase != 0) { // 正在处理请求时死亡
+                playerDiedDuringProcessing = currentProcessingPlayer; // 记录当前处理的玩家
+                logDebug("玩家死亡，立即取消当前处理和队列。");
+                client.player.networkHandler.sendChatCommand("#stop");
+                // 立即清空状态和队列，标记为故障 (isFailure=true)
+                finishProcessing(currentProcessingPlayer, true);
             }
+            return; // 死亡时停止所有 Tick 逻辑
+        } else if (playerDiedDuringProcessing != null) {
+            // 玩家复活，发送反馈
+            String diedPlayer = playerDiedDuringProcessing;
+            playerDiedDuringProcessing = null; // 清除死亡标记
 
-            // 【使用 detectionService】进行抵达检测
+            client.player.networkHandler.sendChatCommand("msg " + diedPlayer + " 跃迁引擎故障：控制员意外阵亡，请求已取消。");
+            logDebug("玩家复活，已发送故障反馈给 " + diedPlayer + "。");
+
+            // 尝试启动队列中的下一个请求
+            if (!requestQueue.isEmpty()) {
+                tickTimer.set(QUEUE_DELAY_TICKS);
+            }
+        }
+        // 【结束】死亡检测和复活反馈
+
+
+        // 核心状态检测（Phase 2/4: GOTO 移动阶段）
+        if (phase == 2 || phase == 4) {
+
+            Vec3d currentPos = client.player.getPos();
+
+            // 1. 动态运动检测
+            if (lastPlayerPos != null) {
+                // 检查玩家是否移动 (阈值 0.01)
+                if (currentPos.distanceTo(lastPlayerPos) > 0.01) {
+                    // 玩家移动了
+                    stationaryTicks = 0;
+                    dynamicTimeoutTicks = 0;
+                } else {
+                    // 玩家静止
+                    stationaryTicks++;
+
+                    if (stationaryTicks > stationaryToleranceTicks) {
+                        // 静止时间超过容忍值，启动超时计时
+                        dynamicTimeoutTicks++;
+
+                        if (dynamicTimeoutTicks > timeoutAfterStationaryTicks) {
+                            logDebug("Phase " + phase + ": GOTO 静止超时（总静止超过 " + (stationaryToleranceTicks + timeoutAfterStationaryTicks) + " 刻），放弃当前请求。");
+                            client.player.networkHandler.sendChatCommand("#stop");
+                            client.player.networkHandler.sendChatMessage("msg " + currentProcessingPlayer + " 跃迁引擎故障：导航系统无响应或目标不可达。");
+                            // 超时，标记为故障 (isFailure=true)
+                            finishProcessing(currentProcessingPlayer, true);
+                            return;
+                        }
+                    }
+                }
+            }
+            lastPlayerPos = currentPos; // 更新位置用于下一刻比较
+
+            // 2. 抵达检测
             if (tickTimer.get() == 0 && detectionService.isArrivalConfirmed(currentTargetMove)) {
                 logDebug("Phase " + phase + ": JumpDrive 内部检测到抵达！");
+
+                // 抵达后重置动态移动状态
+                lastPlayerPos = null;
+                stationaryTicks = 0;
+                dynamicTimeoutTicks = 0;
 
                 if (phase == 2) {
                     logDebug("初始化移动完成，推进到 Phase 3。");
@@ -225,6 +324,7 @@ public class JumpDriveModule implements IModule {
         }
     }
 
+
     /**
      * 核心状态机。
      */
@@ -258,11 +358,16 @@ public class JumpDriveModule implements IModule {
 
                 tickTimer.set(INIT_MOVE_DELAY_TICKS);
                 phase = 2;
-                gotoWaitTimer = MAX_GOTO_WAIT_TICKS;
+
+                // 【动态超时】初始化状态
+                lastPlayerPos = client.player.getPos();
+                stationaryTicks = 0;
+                dynamicTimeoutTicks = 0;
+
                 logDebug("Phase 1 -> 2: 设置计时器 " + INIT_MOVE_DELAY_TICKS + " ticks。");
                 break;
 
-            case 2: // 等待初始化移动抵达 (在 tick() 中轮询)
+            case 2: // 等待初始化移动抵达 (在 tick() 中轮询动态检测)
                 break;
 
             case 3: // 启动回城移动 (GOTO + 消息发送 + 启动检测延迟)
@@ -281,11 +386,16 @@ public class JumpDriveModule implements IModule {
                 tickTimer.set(DETECTION_START_DELAY_TICKS);
 
                 phase = 4;
-                gotoWaitTimer = MAX_GOTO_WAIT_TICKS;
+
+                // 【动态超时】初始化状态
+                lastPlayerPos = client.player.getPos();
+                stationaryTicks = 0;
+                dynamicTimeoutTicks = 0;
+
                 logDebug("Phase 3 -> 4: 启动 GOTO，发送所有消息，设置检测延迟 " + DETECTION_START_DELAY_TICKS + " ticks。");
                 break;
 
-            case 4: // 等待回城移动抵达 (纯等待状态)
+            case 4: // 等待回城移动抵达 (在 tick() 中轮询动态检测)
                 break;
 
             case 5: // 抵达，运行 /muse 并等待玩家检测延迟
@@ -304,7 +414,6 @@ public class JumpDriveModule implements IModule {
                 // 【使用 detectionService】进行玩家检测
                 boolean playerFound = detectionService.isPlayerReturned(playerName);
 
-
                 if (playerFound) {
                     client.player.networkHandler.sendChatMessage("msg " + playerName + " 尊敬的 " + playerName + " , 您已成功跃迁至目标位置，欢迎回家");
                     logDebug("玩家 " + playerName + " 被成功检测到在附近。");
@@ -313,9 +422,8 @@ public class JumpDriveModule implements IModule {
                     logDebug("玩家 " + playerName + " 未在附近被检测到。");
                 }
 
-                if (cooldownMap.getOrDefault(playerName, 0L) <= System.currentTimeMillis()) {
-                    // 冷却逻辑，此处代码被跳过
-                }
+                // 流程成功完成，设置冷却
+                cooldownMap.put(playerName, System.currentTimeMillis() + cooldownMs);
 
                 phase = 7;
                 handlePhase();
@@ -332,6 +440,15 @@ public class JumpDriveModule implements IModule {
     }
 
     // --- 外部事件接口 ---
+
+    /**
+     * 【新增方法】提供 JumpDriveMessageParser 实例供客户端类用于私信解析。
+     * @return JumpDriveMessageParser 实例或 null。
+     */
+    public JumpDriveMessageParser getMessageParser() {
+        return this.messageParser;
+    }
+
     public void onPrivateMessage(String sender, String message) {
         logDebug("收到私信. Sender: " + sender + ", Content: " + message);
         if (!config.enableJumpDriveModule || client.player == null) return;
@@ -349,7 +466,7 @@ public class JumpDriveModule implements IModule {
         }
 
         if (!commandMatches) {
-            logDebug("私信内容不匹配配置的指令正则: " + (jumpDriveCommandPattern != null ? jumpDriveCommandPattern.pattern() : "硬编码'回城'") + "，忽略。");
+            logDebug("私信内容不匹配配置的指令正则，忽略。");
             return;
         }
 
@@ -365,7 +482,7 @@ public class JumpDriveModule implements IModule {
         }
 
         if (!isPlayerInPearlFile(sender)) {
-            ignoredMap.put(sender, currentTime + IGNORE_MS);
+            ignoredMap.put(sender, currentTime + ignoreMs);
             client.player.networkHandler.sendChatMessage("msg " + sender + " 跃迁引擎初始化失败：您需要初始化回城坐标。");
             logDebug(sender + " 珍珠数据不存在，已拒绝并加入忽略列表。");
             return;
@@ -390,7 +507,7 @@ public class JumpDriveModule implements IModule {
     }
 
 
-    // --- 启动和收尾逻辑 (保持不变) ---
+    // --- 启动和收尾逻辑 ---
 
     private void startJumpDrive(String playerName) {
         logDebug("JumpDrive 启动序列: 玩家 " + playerName);
@@ -399,7 +516,7 @@ public class JumpDriveModule implements IModule {
         if (currentTargetPearl == null) {
             client.player.networkHandler.sendChatMessage("msg " + playerName + " 跃迁引擎启动失败：未经处理的异常");
             logDebug("启动失败：未找到有效珍珠坐标。");
-            finishProcessing(playerName);
+            finishProcessing(playerName, true);
             return;
         }
 
@@ -409,24 +526,47 @@ public class JumpDriveModule implements IModule {
         handlePhase();
     }
 
-    private void finishProcessing(String playerName) {
-        cooldownMap.put(playerName, System.currentTimeMillis() + COOLDOWN_MS);
-        logDebug("处理完成。玩家 " + playerName + " 进入冷却。");
+    /**
+     * 流程结束，清理状态和队列。
+     * @param playerName 当前处理的玩家名。
+     * @param isFailure 是否因故障（超时或死亡）而终止。
+     */
+    private void finishProcessing(String playerName, boolean isFailure) {
+        if (isFailure) {
+            logDebug("故障处理完成。玩家 " + playerName + " 状态清理。");
+        } else {
+            logDebug("流程成功完成。玩家 " + playerName + " 状态清理。");
+        }
 
         currentProcessingPlayer = null;
         currentTargetPearl = null;
         currentTargetMove = null;
         phase = 0;
-        gotoWaitTimer = 0;
 
-        if (!requestQueue.isEmpty()) {
+        // 清理动态运动状态
+        lastPlayerPos = null;
+        stationaryTicks = 0;
+        dynamicTimeoutTicks = 0;
+
+        // 如果是故障终止，立即开始下一个请求，避免长时间停滞
+        if (!requestQueue.isEmpty() && isFailure) {
+            tickTimer.set(1);
+            logDebug("故障终止，立即尝试启动下一个请求。");
+        } else if (!requestQueue.isEmpty()) {
+            // 正常完成，设置队列延迟
             tickTimer.set(QUEUE_DELAY_TICKS);
             client.player.networkHandler.sendChatMessage("msg " + requestQueue.peek() + " 跃迁引擎已恢复，您的请求正在处理。");
-            logDebug("队列中还有请求。设置 5 秒延迟，下一个处理者: " + requestQueue.peek());
+            logDebug("队列中还有请求。设置 " + QUEUE_DELAY_TICKS + " 延迟，下一个处理者: " + requestQueue.peek());
         } else {
             logDebug("队列为空，系统进入 Idle。");
         }
     }
+
+    // 重载方法，默认非故障
+    private void finishProcessing(String playerName) {
+        finishProcessing(playerName, false);
+    }
+
 
     // --- 文件和数据逻辑 (保持不变) ---
 
@@ -599,7 +739,6 @@ public class JumpDriveModule implements IModule {
 
     private String buildJumpMessage(String baseMessage) {
         String pureMessage = "[JumpDrive] " + baseMessage;
-        // 确保使用 "msg " + playername 的格式发送私信指令
         return "msg " + currentProcessingPlayer + " " + pureMessage + " " + generateRandomSuffix();
     }
 
@@ -615,6 +754,5 @@ public class JumpDriveModule implements IModule {
         currentProcessingPlayer = null;
         requestQueue.clear();
         phase = 0;
-        gotoWaitTimer = 0;
     }
 }

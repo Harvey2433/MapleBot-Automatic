@@ -8,7 +8,6 @@ public class MaplebotConfig {
     // --- 全局模块启用开关 ---
 
     public boolean enableInteractModule = true;
-    // 已删除: public boolean enableMovementMonitorModule = true;
     public boolean enablePlayerFinderModule = true;
     public boolean enableJumpDriveModule = true;
 
@@ -16,11 +15,7 @@ public class MaplebotConfig {
     // --- 模块配置实例 ---
 
     public InteractSettings interactSettings = new InteractSettings();
-
-    // 已删除: public MovementMonitorSettings monitorSettings = new MovementMonitorSettings();
-
     public PlayerFinderSettings finderSettings = new PlayerFinderSettings();
-
     public JumpDriveSettings jumpDriveSettings = new JumpDriveSettings();
 
     // ----------------------------------------------------
@@ -64,27 +59,30 @@ public class MaplebotConfig {
         // 重载/清理指令名称
         public String jumpDriveCommand = "JumpDrive";
 
-        // 【新增】：允许玩家与目标中心点的误差范围 (半径)。
-        // 原属于 MovementMonitorSettings，现移至此作为 GOTO 抵达阈值。
+        // 允许玩家与目标中心点的误差范围 (半径)。
         public double allowedError = 0.9;
 
-        /**
-         * 【新增】：用于匹配私信日志格式的正则表达式。
-         * 匹配格式示例: [CHAT] FengLiMeng_悄悄地对你说：回城
-         * Group 1: Sender (发送者), Group 2: Content (消息内容)
-         */
+        // 用于匹配私信日志格式的正则表达式。
         public String privateMessageLogRegex = "^(?:\\s*<.*?>)?(.+?)(?:悄悄地对你说| whispers to you)[：:]\\s*(.*)";
 
 
-        /**
-         * 用于匹配回城指令的私信正则表达式。
-         * 例如: "回城" 将匹配 "回城"。
-         * 模块内部将使用 Pattern.CASE_INSENSITIVE 忽略大小写。
-         */
+        // 用于匹配回城指令的私信正则表达式。
         public String jumpDriveMessageRegex = "回城";
+
+        // *** 配置字段：计时器和动态超时 ***
+        /** 玩家回城请求冷却时间 (毫秒) */
+        public int cooldownMs = 60000;
+        /** 玩家无珍珠数据时，进入忽略列表的时间 (毫秒) */
+        public int ignoreMs = 60000;
+
+        /** GOTO过程中，判断为静止的容忍Tick数 (默认 100 ticks = 5 秒) */
+        public int stationaryToleranceTicks = 100;
+        /** 容忍期结束后，触发超时的额外静止Tick数 (默认 300 ticks = 15 秒) */
+        public int timeoutAfterStationaryTicks = 300;
+        // ***************************************
     }
 
-    // --- 默认构造函数（可用于加载时的默认配置） ---
+    // --- 默认构造函数 ---
     public MaplebotConfig() {
         // 确保所有内部类实例都被初始化
     }
