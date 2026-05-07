@@ -2,6 +2,9 @@
   "enableInteractModule": true,
   "enablePlayerFinderModule": true,
   "enableJumpDriveModule": true,
+  "enableAutoReconnect": true,
+  "enableAutoLoginModule": true,
+  "autoReconnectDelaySeconds": 5,
   "interactSettings": {
     "museCommandName": "muse",
     "maxInteractDistance": 5.0,
@@ -11,6 +14,16 @@
   "finderSettings": {
     "finderCommandName": "findplayer",
     "maxSearchDistance": 4.5
+  },
+  "autoLoginSettings": {
+    "enableAutoLogin": true,
+    "loginPassword": "",
+    "preLoginDelayTicks": 40,
+    "preCompassDelayTicks": 60,
+    "queueTargetX": 0,
+    "queueTargetZ": 0,
+    "queueRadius": 1,
+    "queueStandingBlock": "minecraft:beacon"
   },
   "jumpDriveSettings": {
     "pearlFileName": "Pearl.pos",
