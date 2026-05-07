@@ -11,12 +11,19 @@ public class MaplebotConfig {
     public boolean enablePlayerFinderModule = true;
     public boolean enableJumpDriveModule = true;
 
+    // 【黑子补充】：底层基础模块配置呐！
+    public boolean enableAutoReconnect = true;
+    public int autoReconnectDelaySeconds = 5;
+
+    public boolean enableAutoJoinOnStartup = true;
+    public String startupServerAddress = "2b2t.xin";
 
     // --- 模块配置实例 ---
 
     public InteractSettings interactSettings = new InteractSettings();
     public PlayerFinderSettings finderSettings = new PlayerFinderSettings();
     public JumpDriveSettings jumpDriveSettings = new JumpDriveSettings();
+    public AutoLoginSettings autoLoginSettings = new AutoLoginSettings();
 
     // ----------------------------------------------------
     // --- 内部类：模块配置数据结构 ---
@@ -48,6 +55,29 @@ public class MaplebotConfig {
 
         // 最大查找距离（方块数）
         public double maxSearchDistance = 4.5;
+    }
+
+    /**
+     * AutoLoginModule (自动登录与排队模块) 的配置
+     */
+    public static class AutoLoginSettings {
+        // 是否开启进入服务器后的自动输入密码和点击指南针流程
+        public boolean enableAutoLogin = true;
+        // 登录密码
+        public String loginPassword = "YourPasswordHere";
+        // 进入服务器后，等待多少游戏刻再发送登录指令 (20 ticks = 1秒)
+        public int preLoginDelayTicks = 40;
+        // 登录完成后，等待多少游戏刻再点击指南针
+        public int preCompassDelayTicks = 40;
+
+        // 排队检测区域的 X 坐标
+        public int queueTargetX = 0;
+        // 排队检测区域的 Z 坐标
+        public int queueTargetZ = 0;
+        // 允许的排队坐标误差半径
+        public int queueRadius = 1;
+        // 排队时脚下踩着的方块 ID (用于环境检测)
+        public String queueStandingBlock = "minecraft:beacon";
     }
 
     /**

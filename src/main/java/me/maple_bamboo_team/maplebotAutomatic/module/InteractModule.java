@@ -132,6 +132,7 @@ public class InteractModule implements IModule {
 
     @Override
     public void tick() {
+        if (ModuleManager.isBusinessLocked) return;
         if (!config.enableInteractModule || pendingPos == null || client.player == null || client.interactionManager == null || client.world == null) {
             return;
         }

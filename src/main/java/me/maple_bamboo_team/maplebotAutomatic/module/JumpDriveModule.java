@@ -9,6 +9,7 @@ import me.maple_bamboo_team.maplebotAutomatic.module.detection.IDetectionService
 import me.maple_bamboo_team.maplebotAutomatic.module.detection.InternalDetectionService;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
@@ -106,6 +107,12 @@ public class JumpDriveModule implements IModule {
 
         reloadConfigAndData();
         resetModuleState();
+
+        // 【黑子的暴力修复】：监听断开连接事件，彻底清空状态机，防止重连后卡死！
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, clientInstance) -> {
+            logDebug("网络连接断开，强制重置跃迁引擎的所有状态机数据与队列！");
+            resetModuleState();
+        });
 
         if (config.enableJumpDriveModule) {
             logDebug("模块已启用指令: /" + config.jumpDriveSettings.jumpDriveCommand);
@@ -212,6 +219,7 @@ public class JumpDriveModule implements IModule {
 
     @Override
     public void tick() {
+        if (ModuleManager.isBusinessLocked) return;
         if (!config.enableJumpDriveModule || client.player == null) return;
 
         // 1. 首次启动的 InitPos 检查 (仅执行一次)
@@ -248,7 +256,8 @@ public class JumpDriveModule implements IModule {
             if (phase != 0) {
                 retryWaitPlayer = null;
                 playerDiedDuringProcessing = currentProcessingPlayer;
-                client.player.networkHandler.sendChatCommand("#goto cancel");
+                // 【黑子的代码纠正】：给 Baritone 发指令必须是 ChatMessage！
+                client.player.networkHandler.sendChatMessage("#goto cancel");
                 finishProcessing(currentProcessingPlayer, true);
             }
             return;
@@ -263,7 +272,7 @@ public class JumpDriveModule implements IModule {
         if (phase == PHASE_RETRY_WAIT) {
             if (currentTime >= retryWaitTimeoutTimestamp) {
                 if (retryWaitPlayer != null) {
-                    client.player.networkHandler.sendChatMessage(retryWaitPlayer + " " + retryTimeoutMessage);
+                    client.player.networkHandler.sendChatCommand("/msg "+ retryWaitPlayer + " " + retryTimeoutMessage);
                     finishProcessing(retryWaitPlayer, true);
                 } else {
                     phase = 0;
@@ -285,7 +294,8 @@ public class JumpDriveModule implements IModule {
                     if (stationaryTicks > stationaryToleranceTicks) {
                         dynamicTimeoutTicks++;
                         if (dynamicTimeoutTicks > timeoutAfterStationaryTicks) {
-                            client.player.networkHandler.sendChatCommand("goto cancel");
+                            // 【黑子的代码纠正】：给 Baritone 发指令必须是 ChatMessage，并且格式必须正确！
+                            client.player.networkHandler.sendChatMessage("#goto cancel");
                             if (phase != PHASE_IDLE_MOVE) {
                                 client.player.networkHandler.sendChatCommand(buildJumpMessage(currentProcessingPlayer + " 跃迁引擎故障：导航系统无响应或目标不可达"));
                                 finishProcessing(currentProcessingPlayer, true);
@@ -508,9 +518,9 @@ public class JumpDriveModule implements IModule {
         }
 
         if (findNextAvailablePearl(sender, 0) == null) {
-            String msg = isPlayerInPearlFile(sender) ? "所有回城坐标已被暂时排除, 请稍后重试" : "您需要初始化回城坐标";
+            String msg = isPlayerInPearlFile(sender) ? "所有回城坐标已被暂时排除, 请稍后重试" : "请初始化回城坐标";
             ignoredMap.put(sender, currentTime + ignoreMs);
-            client.player.networkHandler.sendChatCommand(buildJumpMessage(" 跃迁引擎初始化失败：" + msg));
+            client.player.networkHandler.sendChatCommand(buildJumpMessage("跃迁引擎初始化失败：" + msg));
             return;
         }
 

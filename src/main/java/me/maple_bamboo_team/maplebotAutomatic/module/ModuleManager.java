@@ -21,6 +21,9 @@ public class ModuleManager {
     public final RotationModule ROTATION_MODULE;
     public final InteractModule INTERACT_MODULE;
     public final PlayerFinderModule PLAYER_FINDER_MODULE;
+    public final AutoReconnect AUTORECONNECT;
+    public final AutoLoginModule AUTOLOGIN;
+    public static boolean isBusinessLocked = true;
 
     public ModuleManager(MinecraftClient client, MaplebotConfig config) {
         this.client = client;
@@ -36,6 +39,10 @@ public class ModuleManager {
         // ⚠️ 注意：JumpDriveModule 的构造函数需要匹配您实际的实现。这里假设它不需要参数。
         this.JUMP_DRIVE_MODULE = new JumpDriveModule();
 
+        this.AUTORECONNECT = new AutoReconnect();
+
+        this.AUTOLOGIN = new AutoLoginModule();
+
         // --- 模块注册 ---
 
         // 1. 注册 RotationModule
@@ -49,6 +56,12 @@ public class ModuleManager {
 
         // 【核心修复】：注册 JumpDriveModule
         registerModule(JUMP_DRIVE_MODULE);
+
+        // 注册自动重连
+        registerModule(AUTORECONNECT);
+
+        // 注册自动登录
+        registerModule(AUTOLOGIN);
 
         initializeModules();
     }

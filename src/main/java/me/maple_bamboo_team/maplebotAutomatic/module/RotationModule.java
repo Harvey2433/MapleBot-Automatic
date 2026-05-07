@@ -52,6 +52,7 @@ public class RotationModule implements IModule {
 
     @Override
     public void tick() {
+        if (ModuleManager.isBusinessLocked) return;
         if (client.player == null || targetVec == null) {
             return;
         }
